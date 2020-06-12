@@ -2,12 +2,14 @@ import math
 import torch
 import gpytorch
 from matplotlib import pyplot as plt
+import os
 
 def prepare_data(n):
     # Training data is 100 points in [0,1] inclusive regularly spaced
-    train_x = torch.linspace(0, 1, n)
+    train_x = torch.linspace(0, 2, n)
     # True function is sin(2*pi*x) with Gaussian noise
     train_y = torch.sin(train_x * (2 * math.pi)) + torch.randn(train_x.size()) * math.sqrt(0.04)
+    # train_y = torch.Tensor((train_x-0.3)**3 + torch.randn(train_x.size()) * math.sqrt(0.04))
     return train_x, train_y
 
 # We will use the simplest form of GP model, exact inference
@@ -22,8 +24,11 @@ class ExactGPModel(gpytorch.models.ExactGP):
         covar_x = self.covar_module(x)
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
-def train(model, optimizer, mll, train_x, train_y, training_iter):
+def search_hyperparameter(model, optimizer, mll, train_x, train_y, training_iter, output_folder, test_x):
     for i in range(training_iter):
+        model.train()
+        model.likelihood.train()
+
         # Zero gradients from previous iteration
         optimizer.zero_grad()
         # Output from model
@@ -31,23 +36,28 @@ def train(model, optimizer, mll, train_x, train_y, training_iter):
         # Calc loss and backprop gradients
         loss = -mll(output, train_y)
         loss.backward()
-        print('Iter %d/%d - Loss: %.3f   lengthscale: %.3f   noise: %.3f' % (
+        print('Iter %2d/%d - Loss: %.3f   lengthscale: %.3f   noise: %.3f' % (
             i + 1, training_iter, loss.item(),
             model.covar_module.base_kernel.lengthscale.item(),
             model.likelihood.noise.item()
         ))
         optimizer.step()
+
+        model.eval()
+        model.likelihood.eval()
+        observed_pred = inference(test_x, model, model.likelihood)
+        plot(train_x, train_y, test_x, observed_pred, i, output_folder)
+
     return model
 
-def test(xmin,xmax,model,likelihood):
+def inference(test_x,model,likelihood):
     # Test points are regularly spaced along [0,1]
     # Make predictions by feeding model through likelihood
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
-        test_x = torch.linspace(xmin, xmax, 51)
         observed_pred = likelihood(model(test_x))
-    return test_x, observed_pred
+    return observed_pred
 
-def plot(train_x, train_y, test_x, observed_pred):
+def plot(train_x, train_y, test_x, observed_pred, index, output_folder):
     with torch.no_grad():
         # Get upper and lower confidence bounds(2 standard deviations)
         lower, upper = observed_pred.confidence_region()
@@ -58,7 +68,9 @@ def plot(train_x, train_y, test_x, observed_pred):
         # Shade between the lower and upper confidence bounds
         plt.fill_between(test_x.numpy(), lower.numpy(), upper.numpy(), alpha=0.5)
         plt.legend(['Observed Data', 'Mean', 'Confidence'])
-    plt.show()
+    plt.savefig(f"{output_folder}/{index}.png")
+    plt.clf()
+    plt.close()
 
 
 def main():
@@ -70,6 +82,8 @@ def main():
 
     training_iter = 50
 
+    output_folder = 'output'
+    os.makedirs(output_folder, exist_ok=True)
 
     # Find optimal model hyperparameters
     model.train()
@@ -79,16 +93,19 @@ def main():
     # "Loss" for GPs - the marginal log likelihood
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 
-    # train
-    model = train(model, optimizer, mll, train_x, train_y, training_iter)
+    xmin, xmax = -0.2, 1.2
+    test_x = torch.linspace(xmin, xmax, 51)
+    model = search_hyperparameter(model, optimizer, mll, train_x, train_y, training_iter, output_folder, test_x)
+
 
     # Get into evaluation (predictive posterior) mode
-    model.eval()
-    likelihood.eval()
+    # model.eval()
+    # likelihood.eval()
 
-    xmin, xmax = -0.2, 1.2
-    test_x, observed_pred = test(xmin,xmax,model,likelihood)
-    plot(train_x, train_y, test_x, observed_pred)
+    # xmin, xmax = -0.2, 1.2
+    # test_x = torch.linspace(xmin, xmax, 51)
+    # observed_pred = inference(xmin,xmax,model,likelihood)
+    # plot(train_x, train_y, test_x, observed_pred)
 
 
 
