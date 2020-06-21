@@ -18,19 +18,34 @@ import datetime
 from torch.autograd import grad as torch_grad
 from torchvision.transforms.functional import to_pil_image, to_tensor
 from network import SoftmaxLoss
+import torchvision.models as models
 
-def download_dataset():
+def download_dataset(transform):
     train_dataset = torchvision.datasets.MNIST('./data', train=True,  download=False, 
-        transform=transforms.ToTensor())
+        transform=transform)
     test_dataset  = torchvision.datasets.MNIST('./data', train=False, download=False, 
-        transform=transforms.ToTensor())
+        transform=transform)
     return train_dataset,test_dataset
 
+def body_feature_model(model):
+    """
+    Returns a model that output flattened features directly from CNN body.
+    """
+    body, pool, head = list(model.children()) 
+    return body, pool, head[:-1]
 
 def main():
-    train_dataset, test_dataset = download_dataset()
+    transform = transforms.Compose([
+        transforms.Resize((224,224), interpolation=2),
+        transforms.Grayscale(num_output_channels=3) ,
+        transforms.ToTensor()#PIL.Image.Image-> torch tensor
+    ])
 
-    model = SoftmaxLoss()
+    train_dataset, test_dataset = download_dataset(transform)
+
+    backbone_model = models.alexnet(pretrained=True)
+    body, pool, head = body_feature_model(backbone_model)
+    model = SoftmaxLoss(body, pool, head)
     params = torch.optim.Adam(model.parameters(),lr=0.001)
     
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=1)
@@ -40,7 +55,10 @@ def main():
     # for i in range(n_epoch):
     #     loss_epoch = 0
     for picture,label in train_dataloader:
+        print(picture.shape)
         out = model(picture)
+        print(out.shape)
+        exit()
         loss = loss_CE(out, label)
         loss.backward()
         params.step()
@@ -50,8 +68,11 @@ def main():
     # ToDo 中間層の可視化
     ## 重み行列の特定の行成分の取得
     # model.Linear2.weight[0]
-    # Question BackBornも更新する？
 
+    # torch.save
+
+    # validでハイパラを探索する部分
+    # Datasetを自分で作った方が早いかも
 
 
 

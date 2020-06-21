@@ -1,18 +1,21 @@
 import torch.nn as nn
 from torch.nn import functional as F
+import torch
 
 class SoftmaxLoss(nn.Module):
-    def __init__(self):
+    def __init__(self, body, pool, head):
         super().__init__()
-        self.Conv1 = nn.ConvTranspose2d(1, 3, 4, stride=1, padding=0, bias=False)
-        self.Conv2 = nn.ConvTranspose2d(3, 3, 4, stride=1, padding=0, bias=False)
-        self.Linear1 = nn.Linear(3468,2)
-        self.Linear2 = nn.Linear(2,10)
+        self.body = body
+        self.pool = pool
+        self.head = head
+        self.Linear1 = nn.Linear(4096,100)
+        self.Linear2 = nn.Linear(100,10)
 
     def forward(self, x):
-        x = F.leaky_relu(self.Conv1(x),inplace=True)
-        x = F.leaky_relu(self.Conv2(x),inplace=True)
-        x = x.view(x.shape[0],-1)
+        x = self.body(x)
+        x = self.pool(x)
+        x = torch.flatten(x, 1)
+        x = self.head(x)
         x = F.leaky_relu(self.Linear1(x),inplace=True)
         x = self.Linear2(x)
 
